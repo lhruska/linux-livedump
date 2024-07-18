@@ -5,6 +5,7 @@
 #include <linux/mem_encrypt.h>
 #include <asm/page.h>
 #include <asm/pgtable_types.h>
+#include <asm/wrprotect.h>
 
 /*
  * Macro to mark a page protection value as UC-
@@ -1023,6 +1024,12 @@ static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
 			      pte_t *ptep, pte_t pte)
 {
 	page_table_check_pte_set(mm, addr, ptep, pte);
+
+#ifdef CONFIG_LIVEDUMP_TEST
+	if (wrprotect_is_on)
+		wrprotect_userspace_set_pte(mm, pte);
+#endif /* CONFIG_LIVEDUMP_TEST */
+
 	set_pte(ptep, pte);
 }
 
@@ -1030,6 +1037,12 @@ static inline void set_pmd_at(struct mm_struct *mm, unsigned long addr,
 			      pmd_t *pmdp, pmd_t pmd)
 {
 	page_table_check_pmd_set(mm, addr, pmdp, pmd);
+
+#ifdef CONFIG_LIVEDUMP_TEST
+	if (wrprotect_is_on)
+		wrprotect_userspace_set_pmd(mm, pmd);
+#endif /* CONFIG_LIVEDUMP_TEST */
+
 	set_pmd(pmdp, pmd);
 }
 

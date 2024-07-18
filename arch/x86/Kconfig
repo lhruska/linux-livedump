@@ -2448,6 +2448,47 @@ config CMDLINE_OVERRIDE
 	  This is used to work around broken boot loaders.  This should
 	  be set to 'N' under normal conditions.
 
+config WRPROTECT
+	bool "Write protection on kernel space"
+	depends on X86_64
+	help
+	  Set this option to 'Y' to allow the kernel to write protect
+	  its own memory space and to handle page fault caused by the
+	  write protection.
+
+	  This feature regularly causes small overhead on kernel.
+	  Once this feature is activated, it causes much more overhead
+	  on kernel.
+
+	  If in doubt, say N.
+
+config LIVEDUMP
+   bool "Live Dump support"
+   depends on WRPROTECT
+   help
+     Set this option to 'Y' to allow the kernel support to acquire
+     a consistent snapshot of kernel space without stopping system.
+
+     This feature regularly causes small overhead on kernel.
+
+     Once this feature is initialized by its special sysfs, it
+     allocates huge memory for itself and causes much more overhead
+     on kernel.
+
+     If in doubt, say N.
+
+config LIVEDUMP_TEST
+   bool "Live Dump support - Test"
+   depends on LIVEDUMP
+   help
+     Set this option to 'Y' to allow livedump test.
+
+	 This config enable a Live Dump testing module and also enable
+	 some additional code used for tracking userspace mapping and all
+	 the struct page handling.
+
+     If in doubt, say N.
+
 config MODIFY_LDT_SYSCALL
 	bool "Enable the LDT (local descriptor table)" if EXPERT
 	default y

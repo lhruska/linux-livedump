@@ -128,6 +128,13 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 		}
 #endif
 		set_pte_at(&init_mm, addr, pte, pfn_pte(pfn, prot));
+#ifdef CONFIG_WRPROTECT
+		if (wrprotect_is_on && !(pgprot_val(prot) & _PAGE_USER) && pfn < max_pfn) {
+			pr_info("wrprotect_lock_check_vmap: new vmap %lx\n", addr);
+			if (wrprotect_protect_new_pte(pte))
+				pr_info("wrprotect_lock_check_vmap: confirmed %lx\n", addr);
+		}
+#endif
 		pfn++;
 	} while (pte += PFN_DOWN(size), addr += size, addr != end);
 	*mask |= PGTBL_PTE_MODIFIED;
@@ -138,6 +145,11 @@ static int vmap_try_huge_pmd(pmd_t *pmd, unsigned long addr, unsigned long end,
 			phys_addr_t phys_addr, pgprot_t prot,
 			unsigned int max_page_shift)
 {
+#ifdef CONFIG_WRPROTECT
+	if (wrprotect_is_init)
+		return 0;
+#endif
+
 	if (max_page_shift < PMD_SHIFT)
 		return 0;
 
@@ -188,6 +200,11 @@ static int vmap_try_huge_pud(pud_t *pud, unsigned long addr, unsigned long end,
 			phys_addr_t phys_addr, pgprot_t prot,
 			unsigned int max_page_shift)
 {
+#ifdef CONFIG_WRPROTECT
+	if (wrprotect_is_init)
+		return 0;
+#endif
+
 	if (max_page_shift < PUD_SHIFT)
 		return 0;
 
@@ -239,6 +256,11 @@ static int vmap_try_huge_p4d(p4d_t *p4d, unsigned long addr, unsigned long end,
 			phys_addr_t phys_addr, pgprot_t prot,
 			unsigned int max_page_shift)
 {
+#ifdef CONFIG_WRPROTECT
+	if (wrprotect_is_init)
+		return 0;
+#endif
+
 	if (max_page_shift < P4D_SHIFT)
 		return 0;
 
@@ -491,6 +513,11 @@ static int vmap_pages_pte_range(pmd_t *pmd, unsigned long addr,
 			return -EINVAL;
 
 		set_pte_at(&init_mm, addr, pte, mk_pte(page, prot));
+#ifdef CONFIG_WRPROTECT
+		if (wrprotect_is_on && !(pgprot_val(prot) & _PAGE_USER) &&
+				page_to_pfn(page) < max_pfn)
+			wrprotect_protect_new_pte(pte);
+#endif
 		(*nr)++;
 	} while (pte++, addr += PAGE_SIZE, addr != end);
 	*mask |= PGTBL_PTE_MODIFIED;
@@ -735,8 +762,8 @@ EXPORT_SYMBOL(vmalloc_to_pfn);
 #define DEBUG_AUGMENT_LOWEST_MATCH_CHECK 0
 
 
-static DEFINE_SPINLOCK(vmap_area_lock);
-static DEFINE_SPINLOCK(free_vmap_area_lock);
+DEFINE_SPINLOCK(vmap_area_lock);
+DEFINE_SPINLOCK(free_vmap_area_lock);
 /* Export for kexec only */
 LIST_HEAD(vmap_area_list);
 static struct rb_root vmap_area_root = RB_ROOT;
@@ -2704,6 +2731,11 @@ static void __vunmap(const void *addr, int deallocate_pages)
 				addr);
 		return;
 	}
+
+#ifdef CONFIG_WRPROTECT
+	if (wrprotect_is_on)
+		wrprotect_protect_vfree(area, (unsigned long)addr);
+#endif
 
 	debug_check_no_locks_freed(area->addr, get_vm_area_size(area));
 	debug_check_no_obj_freed(area->addr, get_vm_area_size(area));

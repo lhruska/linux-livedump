@@ -3,6 +3,11 @@
 #include <linux/highmem.h>
 #include <linux/sched.h>
 #include <linux/hugetlb.h>
+#include <linux/mm_types.h>
+#include <linux/vmalloc.h>
+
+#define	MIN(A, B)	((A) < (B)?(A):(B))
+#define	MAX(A, B)	((A) > (B)?(A):(B))
 
 /*
  * We want to know the real level where a entry is located ignoring any
@@ -29,7 +34,7 @@ static int walk_pte_range_inner(pte_t *pte, unsigned long addr,
 	for (;;) {
 		err = ops->pte_entry(pte, addr, addr + PAGE_SIZE, walk);
 		if (err)
-		       break;
+			break;
 		if (addr >= end - PAGE_SIZE)
 			break;
 		addr += PAGE_SIZE;
@@ -39,7 +44,7 @@ static int walk_pte_range_inner(pte_t *pte, unsigned long addr,
 }
 
 static int walk_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
-			  struct mm_walk *walk)
+			struct mm_walk *walk)
 {
 	pte_t *pte;
 	int err = 0;
@@ -552,6 +557,82 @@ int walk_page_vma(struct vm_area_struct *vma, const struct mm_walk_ops *ops,
 
 	mmap_assert_locked(walk.mm);
 	return __walk_page_range(vma->vm_start, vma->vm_end, &walk);
+}
+
+static int walk_page_range_vmap(struct vmap_area *va, unsigned long start,
+			unsigned long end, struct mm_walk *walk)
+{
+	struct vm_struct *vm;
+	char *vaddr;
+	unsigned long size;
+	int ret;
+
+	if (!va->vm)
+		return 0;
+
+	vm = va->vm;
+	vaddr = (char *) vm->addr;
+	size = get_vm_area_size(vm);
+
+	if (end < (unsigned long)vaddr || start > (unsigned long)vaddr + size)
+		return 0;
+
+	if (!(vm->flags & VM_ALLOC) && !(vm->flags & VM_MAP))
+		return 0;
+
+	ret = walk_pgd_range(MAX(start, (unsigned long)vaddr),
+			MIN(end, (unsigned long)vaddr + size), walk);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+int walk_page_range_kernel(unsigned long start, unsigned long end,
+			const struct mm_walk_ops *ops, pgd_t *pgd,
+			void *private)
+{
+	int ret = 0;
+	struct mm_walk walk = {
+		.ops		= ops,
+		.mm		= &init_mm,
+		.pgd		= pgd,
+		.private	= private,
+		.no_vma		= true
+	};
+
+	if (start >= end)
+		return -EINVAL;
+
+	if (start < vmalloc_base) {
+		mmap_assert_write_locked(walk.mm);
+
+		ret = walk_pgd_range(start, MIN(vmalloc_base, end), &walk);
+
+		if (ret)
+			return ret;
+	}
+
+	if (end > vmalloc_base) {
+		struct vmap_area *va;
+
+		spin_lock(&vmap_area_lock);
+
+		list_for_each_entry(va, &vmap_area_list, list) {
+			ret = walk_page_range_vmap(va, start, end, &walk);
+			if (ret) {
+				spin_unlock(&vmap_area_lock);
+				return ret;
+			}
+		}
+
+		spin_unlock(&vmap_area_lock);
+	}
+
+	if (end > vmemmap_base)
+		ret = walk_pgd_range(MAX(vmemmap_base, start), end, &walk);
+
+	return ret;
 }
 
 /**

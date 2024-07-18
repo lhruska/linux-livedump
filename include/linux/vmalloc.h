@@ -139,6 +139,9 @@ static inline void vmalloc_init(void)
 static inline unsigned long vmalloc_nr_pages(void) { return 0; }
 #endif
 
+extern spinlock_t vmap_area_lock;
+extern spinlock_t free_vmap_area_lock;
+
 extern void *vmalloc(unsigned long size) __alloc_size(1);
 extern void *vzalloc(unsigned long size) __alloc_size(1);
 extern void *vmalloc_user(unsigned long size) __alloc_size(1);

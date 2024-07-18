@@ -56,6 +56,13 @@ static struct bench syscall_benchmarks[] = {
 	{ NULL,		NULL,						NULL			},
 };
 
+static struct bench livedump_benchmarks[] = {
+	{ "interrupt",		"Benchmark for interrupt based livedump", bench_livedump_int },
+	{ "stop-machine",	"Benchmark for stop-machine based livedump", bench_livedump_sm },
+	{ "all",			"Run all livedump benchmarks", NULL },
+	{ NULL,				NULL, NULL }
+};
+
 static struct bench mem_benchmarks[] = {
 	{ "memcpy",	"Benchmark for memcpy() functions",		bench_mem_memcpy	},
 	{ "memset",	"Benchmark for memset() functions",		bench_mem_memset	},
@@ -108,6 +115,7 @@ struct collection {
 static struct collection collections[] = {
 	{ "sched",	"Scheduler and IPC benchmarks",			sched_benchmarks	},
 	{ "syscall",	"System call benchmarks",			syscall_benchmarks	},
+	{ "livedump",	"Livedump benchmarks",				livedump_benchmarks },
 	{ "mem",	"Memory access benchmarks",			mem_benchmarks		},
 #ifdef HAVE_LIBNUMA_SUPPORT
 	{ "numa",	"NUMA scheduling and MM benchmarks",		numa_benchmarks		},

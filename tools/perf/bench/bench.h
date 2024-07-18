@@ -36,6 +36,8 @@ int bench_epoll_ctl(int argc, const char **argv);
 int bench_synthesize(int argc, const char **argv);
 int bench_kallsyms_parse(int argc, const char **argv);
 int bench_inject_build_id(int argc, const char **argv);
+int bench_livedump_sm(int argc, const char **argv);
+int bench_livedump_int(int argc, const char **argv);
 int bench_evlist_open_close(int argc, const char **argv);
 int bench_breakpoint_thread(int argc, const char **argv);
 int bench_breakpoint_enable(int argc, const char **argv);
