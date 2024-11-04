@@ -38,7 +38,7 @@
 
 #define SECTOR_SHIFT		9
 #define PFN_ELF_HDR			0
-#define PFN_ELF_NOTES		1
+#define PFN_ELF_NOTES_START	1
 
 static const char THREAD_NAME[] = "livedump";
 static struct block_device *memdump_bdev;
@@ -277,10 +277,12 @@ void livedump_memdump_sm_init(void)
 
 void livedump_memdump_write_elf_hdr(void)
 {
+	size_t i;
 	/*
 	 * This is possible thanks to elf_data and eflnotes_buf were allocated
 	 * using vzalloc and they cover exactly 1 page each.
 	 */
 	livedump_handle_page(PFN_ELF_HDR, (unsigned long)elf_data, 1);
-	livedump_handle_page(PFN_ELF_NOTES, (unsigned long)elfnotes_buf, 1);
+	for (i = 0; i*PAGE_SIZE < elfnotes_sz; ++i)
+		livedump_handle_page(PFN_ELF_NOTES_START + i, (unsigned long)elfnotes_buf + PAGE_SIZE * i, 1);
 }
