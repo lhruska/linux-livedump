@@ -60,6 +60,9 @@ struct livedump_request_queue {
 	spinlock_t pool_w_lock;
 	spinlock_t pool_r_lock;
 	spinlock_t pend_w_lock;
+
+	atomic_t inserted_count;
+	atomic_t finished_count;
 };
 
 struct livedump_conf {

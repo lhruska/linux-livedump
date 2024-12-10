@@ -105,7 +105,7 @@ void wrprotect_userspace_set_pte(struct mm_struct *mm, pte_t pte)
 		return;
 
 	pfn = pte_pfn(pte);
-	if (test_bit(pfn, wrprotect_state.pgbmp_original))
+	if (wrprotect_state.pgbmp_original && test_bit(pfn, wrprotect_state.pgbmp_original))
 		set_bit(pfn, wrprotect_state.pgbmp_userspace);
 }
 EXPORT_SYMBOL_GPL(wrprotect_userspace_set_pte);
@@ -1092,7 +1092,6 @@ void wrprotect_uninit(void)
 	}
 
 	if (wrprotect_state.state >= WRPROTECT_STATE_STARTED) {
-		wrprotect_is_on = false;
 #ifdef CONFIG_LIVEDUMP_TEST
 		pr_warn("livedump_check: start checking...\n");
 		for (pfn = 0; pfn < max_pfn; ++pfn) {
@@ -1112,6 +1111,7 @@ void wrprotect_uninit(void)
 	}
 
 
+	wrprotect_is_on = false;
 	wrprotect_is_init = false;
 
 	wrprotect_destroy_page_bitmap();

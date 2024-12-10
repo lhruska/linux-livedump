@@ -101,9 +101,14 @@ static void memdump_endio(struct bio *bio)
 	struct livedump_request req = { .p = page_address(bio_page(bio)) };
 	struct livedump_request_queue *queue = (bio->bi_private ?
 			shared.sweep_rq : shared.page_fault_rq);
+	bool is_sweep = (bool)bio->bi_private;
 
+	printk("spin_lock()\n");
 	spin_lock(&queue->pool_w_lock);
-	kfifo_put(&queue->pool, req);
+	printk("kfifo_put() - reg.p = 0x%p, pool = 0x%p\n", req.p, &queue->pool);
+	if (queue->pool_buffer)
+		kfifo_put(&queue->pool, req);
+	printk("spin_unlock()\n");
 	spin_unlock(&queue->pool_w_lock);
 
 	bio_put(bio);
@@ -111,7 +116,7 @@ static void memdump_endio(struct bio *bio)
 	wake_up(shared.pool_waiters);
 
 	pfn = bio->bi_iter.bi_sector >> (PAGE_SHIFT - SECTOR_SHIFT);
-	trace_livedump_handle_page_finished(pfn, (bool)bio->bi_private);
+	trace_livedump_handle_page_finished(pfn, is_sweep);
 }
 
 static int memdump_thread_func(void *_)

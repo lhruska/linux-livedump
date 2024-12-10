@@ -158,6 +158,12 @@ static long alloc_req_queue(void)
 	int i;
 	struct livedump_request req;
 
+	/* initialize counters */
+	atomic_set(&livedump_state.page_fault_rq.inserted_count, 0);
+	atomic_set(&livedump_state.page_fault_rq.finished_count, 0);
+	atomic_set(&livedump_state.sweep_rq.inserted_count, 0);
+	atomic_set(&livedump_state.sweep_rq.finished_count, 0);
+
 	/* initialize spinlocks */
 	spin_lock_init(&livedump_state.page_fault_rq.pool_w_lock);
 	spin_lock_init(&livedump_state.page_fault_rq.pool_r_lock);
@@ -291,6 +297,7 @@ retry_after_wait:
 
 	wake_up(&livedump_state.pend_waiters);
 
+	atomic_inc(&queue->inserted_count);
 	trace_livedump_handle_page(pfn, len, for_sweep);
 
 	ret = true;
@@ -839,20 +846,16 @@ static ssize_t failed_show(struct kobject *kobj,
 	return count;
 }
 
-#ifdef CONFIG_LIVEDUMP_TEST
-
 static ssize_t kfifo_debug_show(struct kobject *kobj,
 				struct kobj_attribute *attr, char *buf)
 {
-	int count;
-
-	count = sprintf(buf, "PAGE_FAULT: %u\n", kfifo_len(&livedump_state.page_fault_rq.pend));
-	count += sprintf(buf, "SWEEP: %u\n", kfifo_len(&livedump_state.sweep_rq.pend));
+	int count = 0;
+	count += sprintf(buf+count, "STATE: %u\n\n", LIVEDUMP_GET_STATE);
+	count += sprintf(buf+count, "PAGE_FAULT: %u, %d, %d\n", kfifo_len(&livedump_state.page_fault_rq.pend), atomic_read(&livedump_state.page_fault_rq.inserted_count), atomic_read(&livedump_state.page_fault_rq.finished_count));
+	count += sprintf(buf+count, "SWEEP: %u, %d, %d\n", kfifo_len(&livedump_state.sweep_rq.pend), atomic_read(&livedump_state.sweep_rq.inserted_count), atomic_read(&livedump_state.sweep_rq.finished_count));
 
 	return count;
 }
-
-#endif /* CONFIG_LIVEDUMP_TEST */
 
 static struct kobj_attribute state_kobj_attr = __ATTR_RW(state);
 static struct kobj_attribute output_kobj_attr = __ATTR_RW(output);
@@ -861,9 +864,7 @@ static struct kobj_attribute use_interrupt_kobj_attr = __ATTR_RW(use_interrupt);
 static struct kobj_attribute buffer_size_kobj_attr = __ATTR_RW(buffer_size);
 static struct kobj_attribute consistent_kobj_attr = __ATTR_RW(consistent);
 static struct kobj_attribute failed_kobj_attr = __ATTR_RO(failed);
-#ifdef CONFIG_LIVEDUMP_TEST
 static struct kobj_attribute kfifo_debug_kobj_attr = __ATTR_RO(kfifo_debug);
-#endif /* CONFIG_LIVEDUMP_TEST */
 static struct attribute *livedump_attrs[] = {
 	&state_kobj_attr.attr,
 	&output_kobj_attr.attr,
@@ -872,9 +873,7 @@ static struct attribute *livedump_attrs[] = {
 	&buffer_size_kobj_attr.attr,
 	&consistent_kobj_attr.attr,
 	&failed_kobj_attr.attr,
-#ifdef CONFIG_LIVEDUMP_TEST
 	&kfifo_debug_kobj_attr.attr,
-#endif /* CONFIG_LIVEDUMP_TEST */
 	NULL
 };
 ATTRIBUTE_GROUPS(livedump);
