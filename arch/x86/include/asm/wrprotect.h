@@ -50,6 +50,7 @@ extern void wrprotect_userspace_set_pte(struct mm_struct *mm, pte_t pte);
 extern void wrprotect_userspace_set_pmd(struct mm_struct *mm, pmd_t pmd);
 extern unsigned long wrprotect_sensitive_count(void);
 
+/* globally accessible states mainly used in page-fault handler */
 extern int wrprotect_is_on;
 extern int wrprotect_is_init;
 

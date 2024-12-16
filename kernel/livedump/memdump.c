@@ -33,7 +33,6 @@
 #include <linux/bio.h>
 #include <linux/blkdev.h>
 #include <linux/sizes.h>
-#include <linux/printk.h>
 #include <linux/tracepoint.h>
 
 #define SECTOR_SHIFT		9
@@ -91,7 +90,7 @@ static void stop_memdump_thread(bool wait)
 	if (atomic_cmpxchg(&memdump_thread.is_active, true, false)) {
 		memdump_thread.wait = wait;
 		wait_for_completion(&memdump_thread.completion);
-		pr_info("memdump stopped\n");
+		pr_info("memdump stopped", wait);
 	}
 }
 
@@ -103,12 +102,8 @@ static void memdump_endio(struct bio *bio)
 			shared.sweep_rq : shared.page_fault_rq);
 	bool is_sweep = (bool)bio->bi_private;
 
-	printk("spin_lock()\n");
 	spin_lock(&queue->pool_w_lock);
-	printk("kfifo_put() - reg.p = 0x%p, pool = 0x%p\n", req.p, &queue->pool);
-	if (queue->pool_buffer)
-		kfifo_put(&queue->pool, req);
-	printk("spin_unlock()\n");
+	kfifo_put(&queue->pool, req);
 	spin_unlock(&queue->pool_w_lock);
 
 	bio_put(bio);
@@ -172,7 +167,7 @@ static int memdump_thread_func(void *_)
 		wait_event_timeout(*shared.pend_waiters, true, msecs_to_jiffies(100));
 	} while (atomic_read(&memdump_thread.is_active) || (memdump_thread.wait && !is_empty));
 
-	while (kfifo_len(&shared.sweep_rq->pool) != livedump_conf.buffer_size &&
+	while (kfifo_len(&shared.sweep_rq->pool) != livedump_conf.buffer_size ||
 			kfifo_len(&shared.page_fault_rq->pool) != livedump_conf.buffer_size)
 		wait_event_timeout(*shared.pool_waiters, true, msecs_to_jiffies(100));
 

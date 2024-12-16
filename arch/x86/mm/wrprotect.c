@@ -74,8 +74,25 @@ struct wrprotect_state {
 
 #ifdef CONFIG_LIVEDUMP_TEST
 
+	/*
+	 * r/w bitmap
+	 * 0: pfn was not handled during page-fault
+	 * 1: pfn was handled during page-fault
+	 */
 	unsigned long *pgbmp_pf;
+
+	/*
+	 * r/w bitmap
+	 * 0: pfn was not handled by sweep
+	 * 1: pfn was handled by sweep
+	 */
 	unsigned long *pgbmp_sweep;
+
+	/*
+	 * r/w bitmap
+	 * 0: there were no userspace mapping on this pfn
+	 * 1: there existed at least one userspace mapping to this pfn
+	 */
 	unsigned long *pgbmp_userspace;
 
 #endif /* CONFIG_LIVEDUMP_TEST */
@@ -97,6 +114,11 @@ EXPORT_SYMBOL(wrprotect_is_init);
 struct wrprotect_state wrprotect_state;
 
 #ifdef CONFIG_LIVEDUMP_TEST
+/*
+ * wrprotect_userspace_set_pte - mark the pte in userspace bitmap
+ * @mm: mm_struct of the userspace task
+ * @pte: pte element of userspace mapping to get the pfn
+ */
 void wrprotect_userspace_set_pte(struct mm_struct *mm, pte_t pte)
 {
 	unsigned long pfn;
@@ -110,6 +132,11 @@ void wrprotect_userspace_set_pte(struct mm_struct *mm, pte_t pte)
 }
 EXPORT_SYMBOL_GPL(wrprotect_userspace_set_pte);
 
+/*
+ * wrprotect_userspace_set_pmd - mark the pmd (huge-page) in userspace bitmap
+ * @mm: mm_struct of the userspace task
+ * @pmd: pmd element of userspace mapping to get the pfn if it is a huge-page
+ */
 void wrprotect_userspace_set_pmd(struct mm_struct *mm, pmd_t pmd)
 {
 	unsigned long pfn, i;
@@ -181,6 +208,13 @@ struct sm_context {
 	void *arg;
 };
 
+/* 
+ * call_leader_follower - stop machine state entry function
+ * @data: sm_context data
+ *
+ * This function makes sure only one cpu is doing the starting phase and the
+ * rest is waiting for it to finish.
+ */
 static int call_leader_follower(void *data)
 {
 	int ret;
@@ -639,6 +673,13 @@ static int sm_leader_page_walk_pte(pte_t *pte, unsigned long addr, unsigned long
 }
 
 #ifdef CONFIG_LIVEDUMP_TEST
+/*
+ * wrprotect_rmap_walk - rmap handler to check for userspace mapping
+ * @folio: folio to process
+ * @vma: userspace task's vma mapping this folio
+ * @addr: virtual address of this folio in this vma mapping
+ * @arg: pointer to userspace bitmap
+ */
 bool wrprotect_rmap_walk(struct folio *folio, struct vm_area_struct *vma,
 				unsigned long addr, void *arg)
 {
@@ -670,6 +711,7 @@ static int sm_leader(void *arg)
 	struct page *page;
 	struct rmap_walk_control rwc;
 
+	/* prepare rmap walk to select pfns with existing userspace mapping */
 	rwc.arg = wrprotect_state.pgbmp_userspace;
 	rwc.rmap_one = wrprotect_rmap_walk;
 	rwc.try_lock = false;
@@ -679,10 +721,12 @@ static int sm_leader(void *arg)
 	rwc.invalid_vma = NULL;
 
 	for (pfn = 0; pfn < max_pfn; ++pfn) {
+		/* Does wrprotect even care about this pfn? */
 		if (!test_bit(pfn, wrprotect_state.pgbmp_original))
 			continue;
 		page = pfn_to_page(pfn);
 		folio = page_folio(page);
+		/* reserved || mapping || lru => userspace page */
 		if (!folio || folio_test_reserved(folio))
 			continue;
 		if (!folio_mapping(folio))
@@ -691,20 +735,29 @@ static int sm_leader(void *arg)
 			set_bit(pfn, wrprotect_state.pgbmp_userspace);
 			continue;
 		}
+
+		/* check rmap */
 		rmap_walk(folio, &rwc);
 	}
 #endif /* CONFIG_LIVEDUMP_TEST */
 
+	/*
+	 * prepare kernel page walk handler to set all (wanted) pfns as r/o
+	 */
 	memset(&sm_leader_walk_ops, 0, sizeof(struct mm_walk_ops));
 	sm_leader_walk_ops.pmd_entry = generic_page_walk_pmd;
 	sm_leader_walk_ops.pte_entry = sm_leader_page_walk_pte;
 
+	/* handle all pages that cannot page fault */
 	handle_sensitive_pages();
 
+	/* call the custom initializer */
 	wrprotect_state.sm_init();
 
+	/* enable wrprotect's page-fault handler */
 	wrprotect_is_on = true;
 
+	/* do the kernel page walk */
 	mmap_write_lock(&init_mm);
 	ret = walk_page_range_kernel(PAGE_OFFSET, FIXADDR_START,
 	    &sm_leader_walk_ops, init_mm.pgd, NULL);
@@ -754,6 +807,9 @@ int wrprotect_start(void)
 	return 0;
 }
 
+/*
+ * wrprotect's implementation using IPI instead of stop-machine
+ */
 static void interrupt_state(void *info)
 {
 	unsigned long flags;
@@ -794,6 +850,7 @@ int wrprotect_start_int(void)
 	/* prevent preemption using cond_resched() */
 	preempt_disable();
 
+	/* IPI all other CPUs */
 	smp_call_function(interrupt_state, (void *)&smp_done, 0);
 
 	/* Save current interrupt state and disable all local interrupts */
@@ -1091,8 +1148,8 @@ void wrprotect_uninit(void)
 		flush_tlb_all();
 	}
 
-	if (wrprotect_state.state >= WRPROTECT_STATE_STARTED) {
 #ifdef CONFIG_LIVEDUMP_TEST
+	if (wrprotect_state.state == WRPROTECT_STATE_SWEPT) {
 		pr_warn("livedump_check: start checking...\n");
 		for (pfn = 0; pfn < max_pfn; ++pfn) {
 			if (!test_bit(pfn, wrprotect_state.pgbmp_original))
@@ -1107,8 +1164,8 @@ void wrprotect_uninit(void)
 						"and pf handler\n", pfn);
 		}
 		pr_warn("livedump_check: done!\n");
-#endif /* CONFIG_LIVEDUMP_TEST */
 	}
+#endif /* CONFIG_LIVEDUMP_TEST */
 
 
 	wrprotect_is_on = false;

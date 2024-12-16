@@ -24,6 +24,7 @@
 
 #define LIVEDUMP_KFIFO_SIZE_DEFAULT	32768 /* in pages */
 
+/* request structure used in kfifos */
 struct livedump_request {
 	void *p; /* pointing to buffer (one page) */
 	unsigned long pfn;
@@ -52,6 +53,15 @@ struct livedump_request {
 struct livedump_request_queue {
 	void **pages;
 
+	/*
+	 * pool - kfifo of free preallocated pages to be used by wrprotect
+	 * pend - kfifo of pages to be processed
+	 *
+	 * Note: Depending on impelementation, pool + pend != buffer_size
+	 * If the system processing thre requests is asynchronous (e.g. bio), there
+	 * might be some requests in the queue that are already removed from the
+	 * pend kfifo.
+	 */
 	DECLARE_KFIFO_PTR(pool, struct livedump_request);
 	void *pool_buffer;
 	DECLARE_KFIFO_PTR(pend, struct livedump_request);
@@ -61,6 +71,7 @@ struct livedump_request_queue {
 	spinlock_t pool_r_lock;
 	spinlock_t pend_w_lock;
 
+	/* stats counters */
 	atomic_t inserted_count;
 	atomic_t finished_count;
 };

@@ -29,7 +29,6 @@
 #include <linux/kfifo.h>
 #include <linux/delay.h>
 #include <linux/sizes.h>
-#include <linux/printk.h>
 #include <linux/tracepoint.h>
 
 #define SECTOR_SHIFT		9
