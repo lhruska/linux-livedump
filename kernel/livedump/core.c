@@ -401,6 +401,11 @@ err:
 	return ret;
 }
 
+/*
+ * livedump_nmi_handler - NMI handler to save registers
+ * @val - interrupt type
+ * @regs - array of registers
+ */
 static int livedump_nmi_handler(unsigned int val, struct pt_regs *regs)
 {
 	int cpu;
@@ -441,7 +446,7 @@ static int livedump_start(void)
 	/* make sure it is propagated before triggering the NMI */
 	wmb();
 
-	/* trigger NMI on all other CPUs */
+	/* trigger NMI on all other CPUs to save registers */
 	apic_send_IPI_allbutself(NMI_VECTOR);
 
 	while (atomic_read(&livedump_state.nmi_handled) > 0)

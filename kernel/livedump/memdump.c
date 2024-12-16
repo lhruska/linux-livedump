@@ -90,7 +90,7 @@ static void stop_memdump_thread(bool wait)
 	if (atomic_cmpxchg(&memdump_thread.is_active, true, false)) {
 		memdump_thread.wait = wait;
 		wait_for_completion(&memdump_thread.completion);
-		pr_info("memdump stopped", wait);
+		pr_info("memdump stopped");
 	}
 }
 
