@@ -103,6 +103,7 @@ static int filedump_thread_func(void *_)
 			kernel_write(filedump_filp, req.p, PAGE_SIZE, &pos);
 			spin_lock(&shared.page_fault_rq->pool_w_lock);
 			kfifo_put(&shared.page_fault_rq->pool, req);
+			atomic_inc(&shared.page_fault_rq->finished_count);
 			spin_unlock(&shared.page_fault_rq->pool_w_lock);
 
 			trace_livedump_handle_page_finished(req.pfn, 0);
@@ -115,6 +116,7 @@ static int filedump_thread_func(void *_)
 			kernel_write(filedump_filp, req.p, PAGE_SIZE, &pos);
 			spin_lock(&shared.sweep_rq->pool_w_lock);
 			kfifo_put(&shared.sweep_rq->pool, req);
+			atomic_inc(&shared.sweep_rq->finished_count);
 			spin_unlock(&shared.sweep_rq->pool_w_lock);
 			wake_up(shared.pool_waiters);
 

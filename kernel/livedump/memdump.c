@@ -111,6 +111,7 @@ static void memdump_endio(struct bio *bio)
 	wake_up(shared.pool_waiters);
 
 	pfn = bio->bi_iter.bi_sector >> (PAGE_SHIFT - SECTOR_SHIFT);
+	atomic_inc(&queue->finished_count);
 	trace_livedump_handle_page_finished(pfn, is_sweep);
 }
 
