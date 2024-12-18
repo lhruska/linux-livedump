@@ -128,7 +128,8 @@ void wrprotect_userspace_set_pte(struct mm_struct *mm, pte_t pte)
 
 	pfn = pte_pfn(pte);
 	if (wrprotect_state.pgbmp_original && test_bit(pfn, wrprotect_state.pgbmp_original))
-		set_bit(pfn, wrprotect_state.pgbmp_userspace);
+		if (wrprotect_state.pgbmp_userspace)
+			set_bit(pfn, wrprotect_state.pgbmp_userspace);
 }
 EXPORT_SYMBOL_GPL(wrprotect_userspace_set_pte);
 
@@ -442,21 +443,46 @@ static void handle_sensitive_pages(void)
 	handle_addr_range((unsigned long)__bss_start, __bss_stop - __bss_start);
 }
 
+static void default_handle_sens_pfn(unsigned long pfn, unsigned long addr)
+{
+	default_handle_pfn_type(pfn, addr, 1);
+}
+
 static void default_handle_pfn(unsigned long pfn, unsigned long addr)
 {
+	default_handle_pfn_type(pfn, addr, 0);
+}
+
+/*
+ * default_no_check_handle_pfn_type - Standard function to handle PFNs
+ * @pfn - PFN to be handled
+ * @addr - virtual address at which this PFN was found
+ * @is_sens_pg - sensitive pages are saved to sweep queue to keep the page-fault
+ * 	queue empty for the wave of page-faults after resuming the machine
+ */
+static void default_handle_pfn_type(unsigned long pfn, unsigned long addr,
+		int is_sens_pg)
+{
 	if (test_bit(pfn, wrprotect_state.pgbmp_original)) {
-		if (!wrprotect_state.handle_page(pfn, addr, 0))
+		if (!wrprotect_state.handle_page(pfn, addr, is_sens_pg))
 			set_bit(pfn, wrprotect_state.pgbmp_fail);
 		clear_bit(pfn, wrprotect_state.pgbmp_original);
 	}
 }
 
+/*
+ * default_no_check_handle_pfn - Handle PFNs without checking any bitmap
+ */
 static void default_no_check_handle_pfn(unsigned long pfn, unsigned long addr)
 {
 	if (!wrprotect_state.handle_page(pfn, addr, 0))
 		set_bit(pfn, wrprotect_state.pgbmp_fail);
 }
 
+/*
+ * sensitive_counter_handle_pfn - Handler to analyze expected number of
+ * 	sensitive PFNs to save
+ */
 static void sensitive_counter_handle_pfn(unsigned long pfn, unsigned long addr)
 {
 	++wrprotect_state.sensitive_counter;
@@ -748,8 +774,13 @@ static int sm_leader(void *arg)
 	sm_leader_walk_ops.pmd_entry = generic_page_walk_pmd;
 	sm_leader_walk_ops.pte_entry = sm_leader_page_walk_pte;
 
+	/* make sure all sensitive pages are stored in sweep queue */
+	wrprotect_state.handle_pfn = default_handle_sens_pfn;
+
 	/* handle all pages that cannot page fault */
 	handle_sensitive_pages();
+
+	wrprotect_state.handle_pfn = default_handle_pfn;
 
 	/* call the custom initializer */
 	wrprotect_state.sm_init();
