@@ -16,7 +16,7 @@
  * GNU General Public License for more details.
  */
 
-#include "core.h"
+#include <linux/livedump.h>
 #include "memdump.h"
 
 #include "trace.h"

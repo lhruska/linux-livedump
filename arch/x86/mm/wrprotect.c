@@ -443,16 +443,6 @@ static void handle_sensitive_pages(void)
 	handle_addr_range((unsigned long)__bss_start, __bss_stop - __bss_start);
 }
 
-static void default_handle_sens_pfn(unsigned long pfn, unsigned long addr)
-{
-	default_handle_pfn_type(pfn, addr, 1);
-}
-
-static void default_handle_pfn(unsigned long pfn, unsigned long addr)
-{
-	default_handle_pfn_type(pfn, addr, 0);
-}
-
 /*
  * default_no_check_handle_pfn_type - Standard function to handle PFNs
  * @pfn - PFN to be handled
@@ -468,6 +458,16 @@ static void default_handle_pfn_type(unsigned long pfn, unsigned long addr,
 			set_bit(pfn, wrprotect_state.pgbmp_fail);
 		clear_bit(pfn, wrprotect_state.pgbmp_original);
 	}
+}
+
+static void default_handle_sens_pfn(unsigned long pfn, unsigned long addr)
+{
+	default_handle_pfn_type(pfn, addr, 1);
+}
+
+static void default_handle_pfn(unsigned long pfn, unsigned long addr)
+{
+	default_handle_pfn_type(pfn, addr, 0);
 }
 
 /*

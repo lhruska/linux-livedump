@@ -16,17 +16,16 @@
  * GNU General Public License for more details.
  */
 
-#include "core.h"
+#include <linux/livedump.h>
 #include "memdump.h"
 #include "filedump.h"
+
+#include <asm/livedump.h>
 
 #define CREATE_TRACE_POINTS
 #include "trace.h"
 
 #include <asm/wrprotect.h>
-#include <asm/irq_vectors.h>
-#include <linux/nmi.h>
-#include <asm/apic.h>
 
 #include <linux/log2.h>
 #include <linux/cpu.h>
@@ -57,7 +56,6 @@ struct livedump_state {
 	atomic_t count;
 	spinlock_t state_lock;
 	struct mutex sysfs_lock;
-	atomic_t nmi_handled;
 	atomic_t failed;
 	wait_queue_head_t pool_waiters;
 	wait_queue_head_t pend_waiters;
@@ -69,7 +67,6 @@ struct livedump_state {
 	__SPIN_LOCK_INITIALIZER(livedump_state.state_lock),
 	__MUTEX_INITIALIZER(livedump_state.sysfs_lock),
 	ATOMIC_INIT(0),
-	ATOMIC_INIT(0)
 };
 
 struct livedump_conf livedump_conf;
@@ -401,29 +398,6 @@ err:
 	return ret;
 }
 
-/*
- * livedump_nmi_handler - NMI handler to save registers
- * @val - interrupt type
- * @regs - array of registers
- */
-static int livedump_nmi_handler(unsigned int val, struct pt_regs *regs)
-{
-	int cpu;
-	unsigned long flags;
-
-	cpu = raw_smp_processor_id();
-
-	local_irq_save(flags);
-
-	memcpy(this_cpu_ptr(livedump_conf.regs), regs, sizeof(struct pt_regs));
-
-	local_irq_restore(flags);
-
-	atomic_dec(&livedump_state.nmi_handled);
-
-	return NMI_HANDLED;
-}
-
 static int livedump_start(void)
 {
 	int ret;
@@ -433,26 +407,9 @@ static int livedump_start(void)
 	/* prevent any CPU hot-swap */
 	cpus_read_lock();
 
-	atomic_set(&livedump_state.nmi_handled, num_online_cpus() - 1);
-
-	/* register our temporary NMI handler */
-	if (WARN(register_nmi_handler(NMI_LOCAL, livedump_nmi_handler,
-			    NMI_FLAG_FIRST, "livedump"),
-				"livedump: could not set NMI handler.\n")) {
-		ret = -EINVAL;
+	ret = arch_livedump_save_registers();
+	if (ret)
 		goto out;
-	}
-
-	/* make sure it is propagated before triggering the NMI */
-	wmb();
-
-	/* trigger NMI on all other CPUs to save registers */
-	apic_send_IPI_allbutself(NMI_VECTOR);
-
-	while (atomic_read(&livedump_state.nmi_handled) > 0)
-		mdelay(1);
-
-	unregister_nmi_handler(NMI_LOCAL, "livedump");
 
 	if (livedump_conf.use_interrupt)
 		ret = wrprotect_start_int();

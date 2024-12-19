@@ -20,7 +20,7 @@
 #define _LIVEDUMP_MEMDUMP_H
 
 #include <linux/fs.h>
-#include "core.h"
+#include <linux/livedump.h>
 
 extern struct livedump_handler memdump_handler;
 

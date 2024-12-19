@@ -2462,9 +2462,16 @@ config WRPROTECT
 
 	  If in doubt, say N.
 
+config ARCH_LIVEDUMP
+   bool "Enable architecture-specific livedump support"
+   depends on X86_64
+   help
+     Set this option to 'Y' to allow the kernel support to enable
+	 architecture-specific livedump support.
+
 config LIVEDUMP
    bool "Live Dump support"
-   depends on WRPROTECT
+   depends on WRPROTECT && ARCH_LIVEDUMP
    help
      Set this option to 'Y' to allow the kernel support to acquire
      a consistent snapshot of kernel space without stopping system.

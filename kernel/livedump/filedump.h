@@ -17,7 +17,7 @@
 #ifndef _LIVEDUMP_FILEDUMP_H
 #define _LIVEDUMP_FILEDUMP_H
 
-#include "core.h"
+#include <linux/livedump.h>
 
 extern struct livedump_handler filedump_handler;
 
