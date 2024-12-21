@@ -52,6 +52,11 @@ struct wrprotect_state {
 	enum state state;
 
 	/*
+	 * Primitive to avoid race conditions during uninitialization
+	 */
+	refcount_t refcount;
+
+	/*
 	 * r/o bitmap after initialization
 	 * 0: there is no virt-address pointing at this pfn which
 	 *    this module ever holded
@@ -127,9 +132,14 @@ void wrprotect_userspace_set_pte(struct mm_struct *mm, pte_t pte)
 		return;
 
 	pfn = pte_pfn(pte);
-	if (wrprotect_state.pgbmp_original && test_bit(pfn, wrprotect_state.pgbmp_original))
-		if (wrprotect_state.pgbmp_userspace)
-			set_bit(pfn, wrprotect_state.pgbmp_userspace);
+
+	if (!refcount_inc_not_zero(&wrprotect_state.refcount))
+		return;
+
+	if (test_bit(pfn, wrprotect_state.pgbmp_original))
+		set_bit(pfn, wrprotect_state.pgbmp_userspace);
+
+	refcount_dec(&wrprotect_state.refcount);
 }
 EXPORT_SYMBOL_GPL(wrprotect_userspace_set_pte);
 
@@ -146,9 +156,15 @@ void wrprotect_userspace_set_pmd(struct mm_struct *mm, pmd_t pmd)
 		return;
 
 	pfn = pmd_pfn(pmd);
+
+	if (!refcount_inc_not_zero(&wrprotect_state.refcount))
+		return;
+
 	for (i = 0; i < PTRS_PER_PMD; ++i)
 		if (test_bit(pfn+i, wrprotect_state.pgbmp_original))
 			set_bit(pfn+i, wrprotect_state.pgbmp_userspace);
+
+	refcount_dec(&wrprotect_state.refcount);
 }
 EXPORT_SYMBOL_GPL(wrprotect_userspace_set_pmd);
 #endif /* CONFIG_LIVEDUMP_TEST */
@@ -302,10 +318,15 @@ void wrprotect_unselect_pages(
 	BUG_ON(start & ~PAGE_MASK);
 	BUG_ON(len & ~PAGE_MASK);
 
+	if (!refcount_inc_not_zero(&wrprotect_state.refcount))
+		return;
+
 	for (addr = start; addr < start + len; addr += PAGE_SIZE) {
 		pfn = kernel_address_to_pfn(addr, &level);
 		clear_bit(pfn, wrprotect_state.pgbmp_original);
 	}
+
+	refcount_dec(&wrprotect_state.refcount);
 }
 
 /* handle_addr_range
@@ -453,11 +474,16 @@ static void handle_sensitive_pages(void)
 static void default_handle_pfn_type(unsigned long pfn, unsigned long addr,
 		int is_sens_pg)
 {
+	if (!refcount_inc_not_zero(&wrprotect_state.refcount))
+		return;
+
 	if (test_bit(pfn, wrprotect_state.pgbmp_original)) {
 		if (!wrprotect_state.handle_page(pfn, addr, is_sens_pg))
 			set_bit(pfn, wrprotect_state.pgbmp_fail);
 		clear_bit(pfn, wrprotect_state.pgbmp_original);
 	}
+
+	refcount_dec(&wrprotect_state.refcount);
 }
 
 static void default_handle_sens_pfn(unsigned long pfn, unsigned long addr)
@@ -475,8 +501,13 @@ static void default_handle_pfn(unsigned long pfn, unsigned long addr)
  */
 static void default_no_check_handle_pfn(unsigned long pfn, unsigned long addr)
 {
+	if (!refcount_inc_not_zero(&wrprotect_state.refcount))
+		return;
+
 	if (!wrprotect_state.handle_page(pfn, addr, 0))
 		set_bit(pfn, wrprotect_state.pgbmp_fail);
+
+	refcount_dec(&wrprotect_state.refcount);
 }
 
 /*
@@ -564,25 +595,37 @@ static int protect_pte(unsigned long addr, int protect)
 int wrprotect_protect_new_pte(pte_t *ptep)
 {
 	unsigned long pfn = pte_pfn(*ptep);
+	int ret = 0;
 
 	if (WARN(pfn * PAGE_SIZE < SZ_1M || pfn > max_pfn, "Invalid PTE: pfn = %lu\n", pfn))
 		return 0;
 
-	if (!test_bit(pfn, wrprotect_state.pgbmp_original))
+	if (!refcount_inc_not_zero(&wrprotect_state.refcount))
 		return 0;
+
+	if (!test_bit(pfn, wrprotect_state.pgbmp_original)) {
+		ret = 0;
+		goto out;
+	}
 
 	if (test_bit(pfn, wrprotect_state.pgbmp_save)) {
 		__protect_pte(ptep, 1);
-		return 1;
+		ret = 1;
 	}
 
-	return 0;
+out:
+	refcount_dec(&wrprotect_state.refcount);
+
+	return ret;
 }
 EXPORT_SYMBOL(wrprotect_protect_new_pte);
 
 void wrprotect_protect_vfree(struct vm_struct *area, unsigned long addr)
 {
 	int i;
+
+	if (!refcount_inc_not_zero(&wrprotect_state.refcount))
+		return;
 
 	for (i = 0; i < area->nr_pages; ++i) {
 		struct page *page = area->pages[i];
@@ -594,6 +637,8 @@ void wrprotect_protect_vfree(struct vm_struct *area, unsigned long addr)
 				set_bit(pfn, wrprotect_state.pgbmp_fail);
 		}
 	}
+
+	refcount_dec(&wrprotect_state.refcount);
 }
 EXPORT_SYMBOL(wrprotect_protect_vfree);
 
@@ -647,8 +692,13 @@ int wrprotect_page_fault_handler(unsigned long error_code)
 			goto not_processed;
 	}
 
-	if (!test_bit(pfn, wrprotect_state.pgbmp_original))
+	if (!refcount_inc_not_zero(&wrprotect_state.refcount))
 		goto not_processed;
+
+	if (!test_bit(pfn, wrprotect_state.pgbmp_original)) {
+		refcount_dec(&wrprotect_state.refcount);
+		goto not_processed;
+	}
 
 	if (test_and_clear_bit(pfn, wrprotect_state.pgbmp_save)) {
 #ifdef CONFIG_LIVEDUMP_TEST
@@ -664,6 +714,8 @@ int wrprotect_page_fault_handler(unsigned long error_code)
 	}
 
 	protect_pte(addr, 0);
+
+	refcount_dec(&wrprotect_state.refcount);
 
 	return true;
 
@@ -690,10 +742,15 @@ static int sm_leader_page_walk_pte(pte_t *pte, unsigned long addr, unsigned long
 
 	pfn = pte_pfn(*pte);
 
+	if (!refcount_inc_not_zero(&wrprotect_state.refcount))
+		return 0;
+
 	if (test_bit(pfn, wrprotect_state.pgbmp_original)) {
 		if (!protect_pte(addr, 1))
 			clear_bit(pfn, wrprotect_state.pgbmp_original);
 	}
+
+	refcount_dec(&wrprotect_state.refcount);
 
 	return 0;
 }
@@ -737,6 +794,9 @@ static int sm_leader(void *arg)
 	struct page *page;
 	struct rmap_walk_control rwc;
 
+	if (!refcount_inc_not_zero(&wrprotect_state.refcount))
+		return -EINVAL;
+
 	/* prepare rmap walk to select pfns with existing userspace mapping */
 	rwc.arg = wrprotect_state.pgbmp_userspace;
 	rwc.rmap_one = wrprotect_rmap_walk;
@@ -765,6 +825,8 @@ static int sm_leader(void *arg)
 		/* check rmap */
 		rmap_walk(folio, &rwc);
 	}
+
+	refcount_dec(&wrprotect_state.refcount);
 #endif /* CONFIG_LIVEDUMP_TEST */
 
 	/*
@@ -1011,6 +1073,9 @@ static int wrprotect_create_page_bitmap(void)
 {
 	unsigned long pfn;
 
+	/* prepare the refcounter first */
+	refcount_set(&wrprotect_state.refcount, 1);
+
 	/* allocate on vmap area */
 	wrprotect_state.pgbmp_original = vzalloc(PGBMP_LEN);
 	if (!wrprotect_state.pgbmp_original)
@@ -1052,6 +1117,9 @@ static int wrprotect_create_page_bitmap(void)
  */
 static void wrprotect_destroy_page_bitmap(void)
 {
+	while(!refcount_dec_if_one(&wrprotect_state.refcount))
+		msleep(10);
+
 	vfree(wrprotect_state.pgbmp_original);
 	vfree(wrprotect_state.pgbmp_save);
 	vfree(wrprotect_state.pgbmp_fail);
@@ -1144,13 +1212,20 @@ static int uninit_page_walk_pte(pte_t *pte, unsigned long addr, unsigned long ne
 
 	pfn = pte_pfn(*pte);
 
-	if (!test_bit(pfn, wrprotect_state.pgbmp_original))
+	if (!refcount_inc_not_zero(&wrprotect_state.refcount))
 		return 0;
+
+	if (!test_bit(pfn, wrprotect_state.pgbmp_original))
+		goto out;
+
 	protect_pte(addr, 0);
 	*pte = pte_clear_flags(*pte, _PAGE_SOFTW1);
 
 	if (!(pfn & 0xffUL))
 		cond_resched();
+
+out:
+	refcount_dec(&wrprotect_state.refcount);
 
 	return 0;
 }
@@ -1179,6 +1254,9 @@ void wrprotect_uninit(void)
 		flush_tlb_all();
 	}
 
+	wrprotect_is_on = false;
+	wrprotect_is_init = false;
+
 #ifdef CONFIG_LIVEDUMP_TEST
 	if (wrprotect_state.state == WRPROTECT_STATE_SWEPT) {
 		pr_warn("livedump_check: start checking...\n");
@@ -1197,10 +1275,6 @@ void wrprotect_uninit(void)
 		pr_warn("livedump_check: done!\n");
 	}
 #endif /* CONFIG_LIVEDUMP_TEST */
-
-
-	wrprotect_is_on = false;
-	wrprotect_is_init = false;
 
 	wrprotect_destroy_page_bitmap();
 
