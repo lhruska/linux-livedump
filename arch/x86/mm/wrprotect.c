@@ -356,10 +356,9 @@ static void handle_addr_range(unsigned long start, unsigned long len)
 static void handle_task(struct task_struct *t)
 {
 	BUG_ON(!t);
-	BUG_ON(!t->stack);
-	BUG_ON((unsigned long)t->stack & ~PAGE_MASK);
 	handle_addr_range((unsigned long)t, sizeof(*t));
-	handle_addr_range((unsigned long)t->stack, THREAD_SIZE);
+	if (t->stack)
+		handle_addr_range((unsigned long)t->stack, THREAD_SIZE);
 }
 
 /* handle_tasks
